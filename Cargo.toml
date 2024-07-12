@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 rand = "0.8.4"
+poise = "0.6"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+dotenv = "0.15"
