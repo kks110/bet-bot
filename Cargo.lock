@@ -101,6 +101,8 @@ dependencies = [
  "dotenv",
  "poise",
  "rand",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

@@ -2,8 +2,12 @@ use rand::rngs::{OsRng, StdRng};
 use rand::*;
 use std::{thread, time};
 use std::fmt::format;
+use std::fs::File;
+use std::io::Write;
 use poise::{CreateReply, serenity_prelude as serenity};
 use rand::SeedableRng;
+use serde::{Serialize, Deserialize};
+use std::io::Read;
 
 struct Data {} // User data, which is stored and accessible in all command invocations
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -14,7 +18,9 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 async fn begin_race(
     ctx: Context<'_>
 ) -> Result<(), Error> {
-    let horses = vec!["Clydesdale", "Shetland Pony", "Shire", "Thoroughbred"];
+
+
+    let horses = load_horses_from_json()?;
 
     let mut race = Race {
         horses: Vec::new(),
@@ -22,22 +28,14 @@ async fn begin_race(
         finished: false,
     };
 
-    for horse_name in &horses {
-        let horse = Horse {
-            name: horse_name.to_string(),
-            max_speed: 5,
-            position: 0,
-            finisher: false,
-        };
-        race.horses.push(horse);
-    }
+    race.horses = horses;
 
     let message = ctx.say(show_race(&race)).await?;
 
     let mut rng = StdRng::from_seed(OsRng.gen());
 
     while !race.finished {
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         for horse in &mut race.horses {
             let roll = rng.gen_range(1..=horse.max_speed);
@@ -63,11 +61,37 @@ async fn begin_race(
             } else {
                 winner_message = format!("It's a photo finish, but: {} wins!", race.winner().name);
             }
+            race.update_winners();
+
+            let response = format!("{}\n{}", show_race(&race), winner_message);
+            message.edit(ctx, CreateReply::default().content(response)).await?;
+
+            for horse in &mut race.horses {
+                horse.position = 0;
+            }
+            save_horses_to_json(&race.horses)?;
+        } else {
+            let response = format!("{}\n{}", show_race(&race), winner_message);
+            message.edit(ctx, CreateReply::default().content(response)).await?;
         }
-        let response = format!("{}\n{}", show_race(&race), winner_message);
-        message.edit(ctx, CreateReply::default().content(response)).await?;
+
     }
 
+    Ok(())
+}
+
+fn load_horses_from_json() -> Result<Vec<Horse>, Error> {
+    let mut file = File::open("./data/horses.json")?;
+    let mut data = String::new();
+    file.read_to_string(&mut data)?;
+    let horses: Vec<Horse> = serde_json::from_str(&data)?;
+    Ok(horses)
+}
+
+fn save_horses_to_json(horses: &Vec<Horse>) -> Result<(), Error> {
+    let data = serde_json::to_string(horses)?;
+    let mut file = File::create("./data/horses.json")?;
+    file.write_all(data.as_bytes())?;
     Ok(())
 }
 
@@ -122,12 +146,23 @@ impl Race {
     fn highest_position(&self) -> i32 {
         self.horses.iter().map(|horse| horse.position).max().unwrap_or(0)
     }
+
+    fn update_winners(&mut self) {
+        let highest_position = self.highest_position();
+        for horse in &mut self.horses {
+            if horse.position == highest_position {
+                horse.wins += 1;
+            }
+        }
+    }
 }
 
+#[derive(Serialize, Deserialize)]
 struct Horse {
     name: String,
     max_speed: i32,
     position: i32,
+    wins: i32,
     finisher: bool,
 }
 
